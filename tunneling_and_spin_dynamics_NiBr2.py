@@ -7,6 +7,8 @@ Created on Thu Mar 12 12:04:44 2026
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import sparse
+from scipy.sparse.linalg import eigsh
 
 def solve_nibr2_inplane(Bx, Bz, J1, J3, J_ex, D=0.15):
     # Constants
@@ -314,9 +316,6 @@ def calculate_conductance_with_hamiltonian():
 
 calculate_conductance_with_hamiltonian()
 #%%
-import numpy as np
-from scipy import sparse
-from scipy.sparse.linalg import eigsh
 
 def solve_nibr2_lattice(Lx, Ly, Bx, Bz, J1, J3, D=0.15):
     N = Lx * Ly
