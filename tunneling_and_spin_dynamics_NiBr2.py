@@ -313,3 +313,57 @@ def calculate_conductance_with_hamiltonian():
     plt.show()
 
 calculate_conductance_with_hamiltonian()
+#%%
+import numpy as np
+from scipy import sparse
+from scipy.sparse.linalg import eigsh
+
+def solve_nibr2_lattice(Lx, Ly, Bx, Bz, J1, J3, D=0.15):
+    N = Lx * Ly
+    g_ni = 2.21
+    mu_B = 0.05788
+    
+    # Base S=1 operators
+    sz = sparse.csr_matrix([[1, 0, -1]]) # This is wrong in your snippet, should be:
+    sz = sparse.diags([1, 0, -1])
+    sp = sparse.csr_matrix([[0, np.sqrt(2), 0], [0, 0, np.sqrt(2)], [0, 0, 0]])
+    sm = sp.getH()
+    sx = (sp + sm) / 2
+    sy = (sp - sm) / 2j
+    id_s = sparse.eye(3)
+
+    def get_op(op, site_idx):
+        """Constructs a global operator for a specific site"""
+        op_list = [id_s] * N
+        op_list[site_idx] = op
+        full_op = op_list[0]
+        for i in range(1, N):
+            full_op = sparse.kron(full_op, op_list[i], format='csr')
+        return full_op
+
+    H = sparse.csr_matrix((3**N, 3**N))
+
+    # 1. Zeeman & Anisotropy (Single Site Terms)
+    for i in range(N):
+        Si_x = get_op(sx, i)
+        Si_z = get_op(sz, i)
+        H += g_ni * mu_B * (Bx * Si_x + Bz * Si_z)
+        H += D * (Si_z ** 2)
+
+    # 2. Exchange (Two-Site Terms)
+    # Define your 2D grid logic here to find neighbors
+    for i in range(N):
+        x, y = i // Ly, i % Ly
+        # Example: Nearest Neighbor J1 (Right and Down)
+        neighbors = []
+        if x + 1 < Lx: neighbors.append(i + Ly)
+        if y + 1 < Ly: neighbors.append(i + 1)
+        
+        for j in neighbors:
+            # S_i . S_j interaction
+            for op in [sx, sy, sz]:
+                H += J1 * (get_op(op, i) @ get_op(op, j))
+
+    # Solve for the lowest few eigenvalues (k=6)
+    vals, vecs = eigsh(H, k=6, which='SA')
+    return vals
