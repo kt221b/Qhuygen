@@ -366,3 +366,176 @@ def solve_nibr2_lattice(Lx, Ly, Bx, Bz, J1, J3, D=0.15):
     # Solve for the lowest few eigenvalues (k=6)
     vals, vecs = eigsh(H, k=6, which='SA')
     return vals
+
+#%%
+
+
+def solve_nibr2_3x3_map(Bx, Bz, J1, J3, J_ex, D=0.15):
+    Lx, Ly = 3, 3
+    N = Lx * Ly
+    g_ni, mu_B = 2.21, 0.05788
+    
+    # Base Sparse Operators
+    sz_s = sparse.diags([1, 0, -1]) # creates the Sz​ operator for a Spin-1 particle:
+    sp_s = sparse.csr_matrix([[0, np.sqrt(2), 0], [0, 0, np.sqrt(2)], [0, 0, 0]]) #sp_s (S+): The raising operator. It moves a spin state "up" (e.g., from ∣−1⟩ to ∣0⟩).
+    sx_s = (sp_s + sp_s.getH()) / 2   #sp_s.getH() The Hermitian adjoint of S+.
+    sy_s = (sp_s - sp_s.getH()) / 2j
+    id_s, id_e = sparse.eye(3), sparse.eye(2)
+    
+    # Pre-compute identity chain for speed
+    def get_full_op(op, i):
+        # i is the site index 0 to 8. Electron is index 9.
+        if i < N:
+            left = sparse.eye(3**i)
+            right = sparse.eye(3**(N-i-1) * 2)
+            return sparse.kron(left, sparse.kron(op, right), format='csr')
+        else: # Electron site
+            return sparse.kron(sparse.eye(3**N), op, format='csr')
+
+    dim = (3**N) * 2
+    H = sparse.csr_matrix((dim, dim), dtype=complex)
+
+    # 1. Zeeman, Anisotropy, and Exchange
+    print("Building Hamiltonian...")
+    for i in range(N):
+        Six, Siz = get_full_op(sx_s, i), get_full_op(sz_s, i)
+        H += g_ni * mu_B * (Bx * Six + Bz * Siz)
+        H += D * (Siz @ Siz)
+        
+        # Neighbor interactions (J1 and J3)
+        r, c = i // Ly, i % Ly
+        for dr, dc, J in [(0, 1, J1), (1, 0, J1), (0, 2, J3), (2, 0, J3)]:
+            nr, nc = r + dr, c + dc
+            if nr < Lx and nc < Ly:
+                n_idx = nr * Ly + nc
+                for op_base in [sx_s, sy_s, sz_s]:
+                    H += J * (get_full_op(op_base, i) @ get_full_op(op_base, n_idx))
+
+    # 2. Tunneling (Electron at index 9 couples to center Ni at index 4)
+    center_ni = 4 
+    sig_x = 2 * get_full_op(0.5 * sparse.csr_matrix([[0, 1], [1, 0]]), N)
+    sig_y = 2 * get_full_op(0.5 * sparse.csr_matrix([[0, -1j], [1j, 0]]), N)
+    sig_z = 2 * get_full_op(0.5 * sparse.diags([1, -1]), N)
+    
+    H += J_ex * (get_full_op(sx_s, center_ni) @ sig_x + 
+                get_full_op(sy_s, center_ni) @ sig_y + 
+                get_full_op(sz_s, center_ni) @ sig_z)
+
+    # 3. Solve for Ground State
+    print("Solving for Ground State...")
+    vals, vecs = eigsh(H, k=1, which='SA')
+    psi = vecs[:, 0]
+
+    # 4. Compute expectations
+    mx, my, mz = np.zeros((Lx, Ly)), np.zeros((Lx, Ly)), np.zeros((Lx, Ly))
+    for i in range(N):
+        r, c = i // Ly, i % Ly
+        mx[r, c] = np.real(psi.conj().T @ get_full_op(sx_s, i) @ psi)
+        my[r, c] = np.real(psi.conj().T @ get_full_op(sy_s, i) @ psi)
+        mz[r, c] = np.real(psi.conj().T @ get_full_op(sz_s, i) @ psi)
+    
+    return mx, my, mz
+
+# Execution and Plot
+mx, my, mz = solve_nibr2_3x3_map(Bx=0, Bz=0, J1=-1.0, J3=0.8, J_ex=0.1)
+
+plt.figure(figsize=(7, 6))
+X, Y = np.meshgrid(np.arange(3), np.arange(3))
+# Use Quiver for in-plane (x,y) and Color for out-of-plane (z)
+st = plt.quiver(X, Y, mx, my, mz, cmap='coolwarm', pivot='middle', scale=2)
+plt.colorbar(st, label='$\langle S_z \\rangle$ Projection')
+plt.title("3x3 NiBr2 Ground State Spin Texture")
+plt.xticks([0, 1, 2]); plt.yticks([0, 1, 2])
+plt.show()
+
+#%%
+
+
+def simulate_nibr2_50x50(Lx=50, Ly=50, Bx=3.5, J1=-1.5, J3=0.8, D=0.15, steps=200):
+    # Initialize random spins on a 50x50 grid (Unit vectors in 3D)
+    spins = np.random.normal(0, 1, (Lx, Ly, 3))
+    norms = np.linalg.norm(spins, axis=2, keepdims=True)
+    spins /= norms
+    
+    g_ni, mu_B = 2.21, 0.05788
+    external_field = np.array([Bx * g_ni * mu_B, 0.0, 0.0])
+
+    for step in range(steps):
+        # We use a copy to update all spins "simultaneously" (Jacobi-style)
+        new_spins = spins.copy()
+        
+        # Vectorized neighbor sum for speed (Roll shifts the whole grid)
+        # Nearest Neighbors (J1)
+        neighbors_J1 = (np.roll(spins, 1, axis=0) + np.roll(spins, -1, axis=0) +
+                        np.roll(spins, 1, axis=1) + np.roll(spins, -1, axis=1))
+        
+        # Third Nearest Neighbors (J3)
+        neighbors_J3 = (np.roll(spins, 2, axis=0) + np.roll(spins, -2, axis=0) +
+                        np.roll(spins, 2, axis=1) + np.roll(spins, -2, axis=1))
+        
+        # Effective Field: B_total = B_ext - J1*sum(S_nn) - J3*sum(S_3nn)
+        # Note: D acts as a field pulling Sz toward 0 if D > 0 (Easy Plane)
+        B_eff = external_field - (J1 * neighbors_J1) - (J3 * neighbors_J3)
+        B_eff[:, :, 2] -= 2 * D * spins[:, :, 2]
+        
+        # Align spins with the local field
+        mag = np.linalg.norm(B_eff, axis=2, keepdims=True)
+        new_spins = B_eff / (mag + 1e-9)
+        
+        # Mixing/Damping to ensure smooth convergence
+        spins = 0.1 * new_spins + 0.9 * spins
+        
+    return spins
+
+# Run the simulation
+# J3 must be > |J1|/4 to see the spiral!
+spins_final = simulate_nibr2_50x50(Bx=3.5, J1=-1.0, J3=0.8, D=0.2)
+
+# 2. Plotting the Texture
+plt.figure(figsize=(10, 10))
+# To keep the plot readable, we skip every 2nd arrow (subsampling)
+sub = 2
+X, Y = np.meshgrid(np.arange(0, 50, sub), np.arange(0, 50, sub))
+u = spins_final[::sub, ::sub, 0]
+v = spins_final[::sub, ::sub, 1]
+color = spins_final[::sub, ::sub, 2] # Color by Sz
+
+plt.quiver(X, Y, u, v, color, cmap='hsv', pivot='middle', scale=25)
+plt.title(f"50x50 NiBr2 Spin Texture (Mean Field)\n$J_1=-1.0, J_3=0.8$ (Frustrated Spiral)")
+plt.xlabel("Lattice X"); plt.ylabel("Lattice Y")
+plt.show()
+
+#%%
+
+def visualize_nibr2_simple(L=10, Bx=0.0, J1=-0.415, J3=0.614):
+    # 1. Initialize 100 spins pointing in random directions
+    # Each spin is a vector [sx, sy, sz]
+    spins = np.random.normal(0, 1, (L, L, 3))
+    spins /= np.linalg.norm(spins, axis=2, keepdims=True) # Normalize to length 1
+    
+    # 2. Let them "relax" to their lowest energy state (Iterative update)
+    for _ in range(100):
+        for r in range(L):
+            for c in range(L):
+                # Calculate the "Force" (Field) from neighbors
+                # For simplicity, just Nearest Neighbors here
+                neighbor_sum = (spins[(r+1)%L, c] + spins[(r-1)%L, c] + 
+                                spins[r, (c+1)%L] + spins[r, (c-1)%L])
+                
+                # The spin wants to align with this sum
+                # (Adding Bx field here if needed)
+                new_direction = -J1 * neighbor_sum + np.array([Bx, 0, 0])
+                
+                # Update the spin
+                mag = np.linalg.norm(new_direction)
+                if mag > 0:
+                    spins[r, c] = new_direction / mag
+
+    # 3. Plot the result
+    X, Y = np.meshgrid(np.arange(L), np.arange(L))
+    plt.figure(figsize=(6,6))
+    plt.quiver(X, Y, spins[:,:,0], spins[:,:,1], pivot='middle', color='teal')
+    plt.title(f"NiBr2 Spin Structure ({L}x{L})")
+    plt.show()
+
+visualize_nibr2_simple(L=50, J1=-1.0)
