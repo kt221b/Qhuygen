@@ -370,10 +370,10 @@ def solve_nibr2_lattice(Lx, Ly, Bx, Bz, J1, J3, D=0.15):
 #%%
 
 
-def solve_nibr2_3x3_map(Bx, Bz, J1, J3, J_ex, D=0.15):
+def solve_nibr2_3x3_map(Bx, Bz, J1, J3, J_ex, D=0.6):
     Lx, Ly = 3, 3
     N = Lx * Ly
-    g_ni, mu_B = 2.21, 0.05788
+    g_ni, mu_B = 2.21, 0.05788   # mu_B = 0.05788	meV/T
     
     # Base Sparse Operators
     sz_s = sparse.diags([1, 0, -1]) # creates the Sz​ operator for a Spin-1 particle:
@@ -437,7 +437,7 @@ def solve_nibr2_3x3_map(Bx, Bz, J1, J3, J_ex, D=0.15):
     return mx, my, mz
 
 # Execution and Plot
-mx, my, mz = solve_nibr2_3x3_map(Bx=0, Bz=0, J1=-1.0, J3=0.8, J_ex=0.1)
+mx, my, mz = solve_nibr2_3x3_map(Bx=0, Bz=0, J1=-3.19, J3=1.56, J_ex=0.0)
 
 plt.figure(figsize=(7, 6))
 X, Y = np.meshgrid(np.arange(3), np.arange(3))
@@ -451,11 +451,13 @@ plt.show()
 #%%
 
 
-def simulate_nibr2_50x50(Lx=50, Ly=50, Bx=3.5, J1=-1.5, J3=0.8, D=0.15, steps=200):
+def simulate_nibr2_50x50(Lx=50, Ly=50, Bx=0, J1=-3.19, J3=1.56, D=0.60, steps=1000):
     # Initialize random spins on a 50x50 grid (Unit vectors in 3D)
+    #Initialize random spins BUT kill the Z component immediately
     spins = np.random.normal(0, 1, (Lx, Ly, 3))
+    spins[:, :, 2] = 0  # Force Sz to be zero at the start
     norms = np.linalg.norm(spins, axis=2, keepdims=True)
-    spins /= norms
+    spins /= (norms + 1e-9)
     
     g_ni, mu_B = 2.21, 0.05788
     external_field = np.array([Bx * g_ni * mu_B, 0.0, 0.0])
@@ -489,7 +491,7 @@ def simulate_nibr2_50x50(Lx=50, Ly=50, Bx=3.5, J1=-1.5, J3=0.8, D=0.15, steps=20
 
 # Run the simulation
 # J3 must be > |J1|/4 to see the spiral!
-spins_final = simulate_nibr2_50x50(Bx=3.5, J1=-1.0, J3=0.8, D=0.2)
+spins_final = simulate_nibr2_50x50(Bx=0, J1=-3.19, J3=1.56, D=0.60)
 
 # 2. Plotting the Texture
 plt.figure(figsize=(10, 10))
@@ -500,42 +502,50 @@ u = spins_final[::sub, ::sub, 0]
 v = spins_final[::sub, ::sub, 1]
 color = spins_final[::sub, ::sub, 2] # Color by Sz
 
-plt.quiver(X, Y, u, v, color, cmap='hsv', pivot='middle', scale=25)
-plt.title(f"50x50 NiBr2 Spin Texture (Mean Field)\n$J_1=-1.0, J_3=0.8$ (Frustrated Spiral)")
+plt.quiver(X, Y, u, v, color, cmap='coolwarm', pivot='middle', scale=40)
+plt.title(f"50x50 NiBr2 Spin Texture (Mean Field)\n$J_1=-3.19, J_3=1.56$ (Frustrated Spiral)")
 plt.xlabel("Lattice X"); plt.ylabel("Lattice Y")
 plt.show()
 
 #%%
-
-def visualize_nibr2_simple(L=10, Bx=0.0, J1=-0.415, J3=0.614):
-    # 1. Initialize 100 spins pointing in random directions
-    # Each spin is a vector [sx, sy, sz]
-    spins = np.random.normal(0, 1, (L, L, 3))
-    spins /= np.linalg.norm(spins, axis=2, keepdims=True) # Normalize to length 1
+def simulate_nibr2_triangular(Lx=48, Ly=48, Bx=0.1, J1=-3.19, J3=1.56, D=0.6, steps=2000):
+    # 1. Initialize spins in-plane (crucial for Panel a)
+    spins = np.random.normal(0, 1, (Lx, Ly, 3))
+    spins[:, :, 2] = 0 
     
-    # 2. Let them "relax" to their lowest energy state (Iterative update)
-    for _ in range(100):
-        for r in range(L):
-            for c in range(L):
-                # Calculate the "Force" (Field) from neighbors
-                # For simplicity, just Nearest Neighbors here
-                neighbor_sum = (spins[(r+1)%L, c] + spins[(r-1)%L, c] + 
-                                spins[r, (c+1)%L] + spins[r, (c-1)%L])
-                
-                # The spin wants to align with this sum
-                # (Adding Bx field here if needed)
-                new_direction = -J1 * neighbor_sum + np.array([Bx, 0, 0])
-                
-                # Update the spin
-                mag = np.linalg.norm(new_direction)
-                if mag > 0:
-                    spins[r, c] = new_direction / mag
+    for step in range(steps):
+        # 2. Triangular Neighbors (J1)
+        # Standard square + the diagonal (bottom-left to top-right)
+        neighbors_J1 = (np.roll(spins, 1, 0) + np.roll(spins, -1, 0) +
+                        np.roll(spins, 1, 1) + np.roll(spins, -1, 1) +
+                        np.roll(np.roll(spins, 1, 0), -1, 1) + 
+                        np.roll(np.roll(spins, -1, 0), 1, 1))
 
-    # 3. Plot the result
-    X, Y = np.meshgrid(np.arange(L), np.arange(L))
-    plt.figure(figsize=(6,6))
-    plt.quiver(X, Y, spins[:,:,0], spins[:,:,1], pivot='middle', color='teal')
-    plt.title(f"NiBr2 Spin Structure ({L}x{L})")
-    plt.show()
+        # 3. Third Neighbors (J3) - straight lines further out
+        neighbors_J3 = (np.roll(spins, 2, 0) + np.roll(spins, -2, 0) +
+                        np.roll(spins, 2, 1) + np.roll(spins, -2, 1))
 
-visualize_nibr2_simple(L=50, J1=-1.0)
+        # 4. Field calculation with "Annealing" noise
+        B_eff = -(J1 * neighbors_J1) - (J3 * neighbors_J3)
+        B_eff[:, :, 2] -= 2 * D * spins[:, :, 2] # Easy-plane
+        B_eff[:, :, 0] += Bx * 2.21 * 0.05788   # External field
+        
+        # Add cooling noise to find the "Stripe" ground state
+        temp = 0.5 * (1 - step/steps)**2  # Quadratic decay
+        B_eff += np.random.normal(0, temp, B_eff.shape)
+
+        # 5. Normalize and Mix
+        mag = np.linalg.norm(B_eff, axis=2, keepdims=True)
+        spins = 0.2 * (B_eff / (mag + 1e-9)) + 0.8 * spins
+        
+    return spins
+#%% color = spins_final[:, :, 1] # This shows the Sy component
+spins_final = simulate_nibr2_triangular(Lx=48, Ly=48, Bx=0.1, steps=3000)
+
+# Visualizing Panel a:
+plt.figure(figsize=(8, 8))
+# Use bilinear interpolation to make it look like the paper (smooth waves)
+plt.imshow(spins_final[:, :, 1], cmap='coolwarm', interpolation='bilinear')
+plt.title("NiBr2 Ground State: Long-Range Spiral Stripes")
+plt.axis('off') # Remove axis for that clean paper look
+plt.show()
