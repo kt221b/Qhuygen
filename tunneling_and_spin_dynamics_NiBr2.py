@@ -508,7 +508,7 @@ plt.xlabel("Lattice X"); plt.ylabel("Lattice Y")
 plt.show()
 
 #%%
-def simulate_nibr2_triangular(Lx=48, Ly=48, Bx=0.1, J1=-3.19, J3=1.56, D=0.6, steps=2000):
+def simulate_nibr2_triangular(Lx=48, Ly=48, Bx=0.1, J1=-0.415, J3=0.614, D=0.15, steps=2000):
     # 1. Initialize spins in-plane (crucial for Panel a)
     spins = np.random.normal(0, 1, (Lx, Ly, 3))
     spins[:, :, 2] = 0 
@@ -540,12 +540,45 @@ def simulate_nibr2_triangular(Lx=48, Ly=48, Bx=0.1, J1=-3.19, J3=1.56, D=0.6, st
         
     return spins
 #%% color = spins_final[:, :, 1] # This shows the Sy component
-spins_final = simulate_nibr2_triangular(Lx=48, Ly=48, Bx=0.1, steps=3000)
+spins_final = simulate_nibr2_triangular(Lx=48, Ly=48, Bx=30.0, steps=3000)
 
-# Visualizing Panel a:
-plt.figure(figsize=(8, 8))
-# Use bilinear interpolation to make it look like the paper (smooth waves)
-plt.imshow(spins_final[:, :, 1], cmap='coolwarm', interpolation='bilinear')
-plt.title("NiBr2 Ground State: Long-Range Spiral Stripes")
-plt.axis('off') # Remove axis for that clean paper look
+
+# 1. Prepare the triangular coordinates
+Lx, Ly = 48, 48
+x = np.arange(Lx)
+y = np.arange(Ly)
+X, Y = np.meshgrid(x, y)
+
+# Shift coordinates for the triangular lattice look
+X_tri = X + 0.5 * Y
+Y_tri = Y * (np.sqrt(3) / 2)
+
+# 2. Setup the Plot
+plt.figure(figsize=(10, 10))
+
+# A. Background: The smooth Sy stripes (Panel a style)
+# We use pcolormesh here because it handles the skewed X_tri/Y_tri coordinates correctly
+plt.pcolormesh(X_tri, Y_tri, spins_final[:, :, 1], cmap='coolwarm', shading='gouraud', alpha=0.8)
+
+# B. Foreground: The Spin Arrows (Quiver)
+# We subsample by 'skip' to keep the plot readable
+skip = 2 
+X_q = X_tri[::skip, ::skip]
+Y_q = Y_tri[::skip, ::skip]
+U_q = spins_final[::skip, ::skip, 0] # Sx component
+V_q = spins_final[::skip, ::skip, 1] # Sy component
+
+# pivot='middle' centers the arrow on the atom site
+plt.quiver(X_q, Y_q, U_q, V_q, 
+           color='black', 
+           pivot='middle', 
+           scale= 50,      # Adjust scale to make arrows larger/smaller
+           width=0.003, 
+           headwidth=3)
+
+plt.gca().set_aspect('equal')
+plt.axis('off')
+plt.title("NiBr2 Spin Texture: Stripes with Quiver Overlay")
 plt.show()
+
+
