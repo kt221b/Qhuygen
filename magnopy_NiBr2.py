@@ -7,7 +7,7 @@ Created on Thu Apr  2 13:36:37 2026
 import numpy as np
 import matplotlib.pyplot as plt
 import magnopy 
-print(magnopy.__file__)
+# print(magnopy.__file__)
 
 # 1. Define the Cell (NiBr2 parameters)
 a, c = 3.70, 6.26
@@ -38,16 +38,12 @@ convention = magnopy.Convention(
 # 4. Initialize Hamiltonian
 spinham = magnopy.SpinHamiltonian(cell=cell, atoms=atoms, convention=convention)
 
-# spinham.add(nus = [(0,0,0),(0,0,0)], alphas=(0,0), parameter= np.diag([0,0,0.3]))
-# spinham.add(nus = [(0,0,0),(1,0,0)], alphas=(0,0), parameter= 1.2*np.eye(3), populate_equivalent=True)
-# spinham.add(nus = [(0,0,0),(0,1,0)], alphas=(0,0), parameter= 1.2*np.eye(3), populate_equivalent=True)
-# spinham.add(nus = [(0,0,0),(1,1,0)], alphas=(0,0), parameter= 1.2*np.eye(3), populate_equivalent=True)
 # --- Magnetic Parameters ---
 # J values (in meV)
-j1 = 3.19   # Ferromagnetic
+j1 = 1.2   # Ferromagnetic
 j2 = 0.0    # Often small/neglected in NiBr2, but added here for completeness
-j3 = -1.56   # Antiferromagnetic (Drives the helimagnetism)
-K  = 0.1    # Easy-plane (Hard-axis Z)
+j3 = -0.4   # Antiferromagnetic (Drives the helimagnetism)
+K  = 0.3    # Easy-plane (Hard-axis Z)
 
 # 1. On-site Anisotropy (21 group equivalent)
 spinham.add(nus=[(0,0,0), (0,0,0)], alphas=(0,0), parameter=np.diag([0, 0, K]))
