@@ -40,11 +40,15 @@ spinham = magnopy.SpinHamiltonian(cell=cell, atoms=atoms, convention=convention)
 
 # --- Magnetic Parameters ---
 # J values (in meV)
-j1 = 1.2   # Ferromagnetic
-j2 = 0.0    # Often small/neglected in NiBr2, but added here for completeness
-j3 = -0.4   # Antiferromagnetic (Drives the helimagnetism)
-K  = 0.3    # Easy-plane (Hard-axis Z)
-
+j1 = -1.313   # Ferromagnetic
+j2 = 0.016    # Often small/neglected in NiBr2, but added here for completeness
+j3 = 0.496   # Antiferromagnetic (Drives the helimagnetism)
+K  = 0.025    # Easy-plane (Hard-axis Z)
+#from neutron diffraction paper
+# j1 = 1.56   # Ferromagnetic
+# j2 = -0.018    # Often small/neglected in NiBr2, but added here for completeness
+# j3 = -0.457   # Antiferromagnetic (Drives the helimagnetism)
+# K  = 0.15    # Easy-plane (Hard-axis Z)
 # 1. On-site Anisotropy (21 group equivalent)
 spinham.add(nus=[(0,0,0), (0,0,0)], alphas=(0,0), parameter=np.diag([0, 0, K]))
 
@@ -104,7 +108,7 @@ else:
 
 # 5) Create the Supercell
 # Note: It's a standalone function where you pass the original spinham
-supercell_shape = (20, 20, 1)
+supercell_shape = (30, 30, 1)
 new_spinham = magnopy.make_supercell(spinham=spinham, supercell=supercell_shape)
 
 # 6) Optimization Setup
@@ -123,9 +127,13 @@ print(f"Starting optimization for {n_spins} spins...")
 # method='cg' (Conjugate Gradient) is usually the best for this
 optimized_state = energy.optimize(initial_state, energy_tolerance=1e-6)
 #%% plots
-pos = np.array(new_spinham.atoms.positions)
-x = pos[:, 0]
-y = pos[:, 1]
+frac_pos = np.array(new_spinham.atoms.positions)
+
+super_cell_matrix = np.array(new_spinham.cell)
+cart_pos = frac_pos @ super_cell_matrix
+
+x = cart_pos[:, 0]
+y = cart_pos[:, 1]
 
 # 2. Convert optimized_state to a NumPy array if it isn't one
 # Shape should be (N_spins, 3)
@@ -139,11 +147,11 @@ plt.figure(figsize=(10, 8))
 
 # Quiver plot: (x, y) are positions, (u, v) are the spin directions in-plane
 # We color the arrows by their Z-component (w) to see if any point out-of-plane
-q = plt.quiver(x, y, u, v, w, cmap='coolwarm', pivot='mid', scale=20)
+q = plt.quiver(x, y, u, v, cmap='coolwarm', pivot='mid', scale=60)
 
 # Add a colorbar to represent Sz (Out-of-plane component)
-cbar = plt.colorbar(q)
-cbar.set_label('Spin Z-component ($S_z$)')
+# cbar = plt.colorbar(q)
+# cbar.set_label('Spin Z-component ($S_z$)')
 
 # Formatting for the triangular lattice
 plt.gca().set_aspect('equal')
@@ -153,3 +161,68 @@ plt.ylabel('y ($\AA$)')
 plt.grid(True, linestyle='--', alpha=0.5)
 
 plt.show()
+#%%
+def calculate_conductance_with_magnopy():
+    # --- Physical Parameters ---
+    hbar = 6.5821e-13  # meV * s
+    m0 = 5.6856e-32    # mass of electron
+    d = 6.26           # NiBr2 Thickness (Angstroms)
+    E_fermi = 250.0    # Lead Fermi Energy (meV)
+    V_offset = 500.0   # Static barrier height (meV)
+    g_factor = 2.0
+    mu_B = 0.05788     # meV/T
+    
+    # Range of Magnetic Fields
+    Bx_fields = np.linspace(0, 8, 20) # Start with fewer points as optimization takes time
+    conductance_list = []
+
+    # Initial state for the first optimization
+    current_state = initial_state # Using your randomized state from the previous block
+
+    print("Starting Magnetic Field Sweep...")
+
+    for B in Bx_fields:
+        # 1. Update Zeeman Term in the Hamiltonian
+        # Zeeman energy = -g * mu_B * B * S_x
+        # We add this as an on-site term (21 group)
+        zeeman_param = -g_factor * mu_B * B
+        zeeman_matrix = np.diag([zeeman_param, 0, 0])
+        
+        # Clear previous field terms if necessary or just add/overwrite
+        # Note: If your version doesn't support 'overwrite', you may need to recreate the spinham
+        new_spinham.add(nus=[(0,0,0), (0,0,0)], alphas=(0,0), 
+                        parameter=zeeman_matrix, overwrite=True)
+        
+        # 2. Re-optimize the state for the new field
+        # Using the previous state as the starting point (warm start) speed up convergence
+        energy_calc = magnopy.Energy(new_spinham)
+        optimized_state = energy_calc.optimize(current_state, energy_tolerance=1e-5)
+        current_state = optimized_state # Save for next field step
+        
+        # 3. Calculate Average Energy per site (meV)
+        # Total Energy / Number of Spins
+        total_energy = energy_calc(optimized_state)
+        avg_spin_energy = total_energy / n_spins
+        
+        # 4. Modulate Tunneling Barrier
+        V_eff = V_offset + avg_spin_energy
+        
+        # 5. Calculate Transmission T
+        alpha = np.sqrt(2 * m0 * (V_eff - E_fermi)) / hbar
+        prefactor = (V_eff**2) / (4 * E_fermi * (V_eff - E_fermi))
+        T = 1 / (1 + prefactor * (np.sinh(alpha * d))**2)
+        
+        conductance_list.append(T)
+        print(f"B = {B:.2f} T | Energy/site: {avg_spin_energy:.4f} meV | T: {T:.4e}")
+
+    # --- Plotting ---
+    plt.figure(figsize=(9, 5))
+    G_plot = np.array(conductance_list) / np.max(conductance_list)
+    plt.plot(Bx_fields, G_plot, 'o-', color='darkred', lw=2)
+    plt.title("Conductance vs $B_x$ (Atomistic 30x30 Supercell)")
+    plt.xlabel("Magnetic Field $B_x$ (T)")
+    plt.ylabel("Normalized Conductance $G/G_{max}$")
+    plt.grid(True, alpha=0.3)
+    plt.show()
+
+calculate_conductance_with_magnopy()
