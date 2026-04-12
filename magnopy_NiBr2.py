@@ -155,7 +155,7 @@ q = plt.quiver(x, y, u, v, cmap='coolwarm', pivot='mid', scale=60)
 
 # Formatting for the triangular lattice
 plt.gca().set_aspect('equal')
-plt.title('NiBr2 Optimized Spin Texture (20x20 Supercell)')
+plt.title('NiBr2 Optimized Spin Texture (2 0x20 Supercell)')
 plt.xlabel('x ($\AA$)')
 plt.ylabel('y ($\AA$)')
 plt.grid(True, linestyle='--', alpha=0.5)
@@ -173,11 +173,14 @@ def calculate_conductance_with_magnopy():
     mu_B = 0.05788     # meV/T
     
     # Range of Magnetic Fields
-    Bx_fields = np.linspace(0, 8, 20) # Start with fewer points as optimization takes time
+    Bx_fields = np.linspace(-5, 5, 20) # Start with fewer points as optimization takes time
     conductance_list = []
-
+    global optimized_state
+    supercell_shape = (30, 30, 1)
+    new_spinham = magnopy.make_supercell(spinham=spinham, supercell=supercell_shape)
     # Initial state for the first optimization
-    current_state = initial_state # Using your randomized state from the previous block
+    n_spins_actual = len(new_spinham.atoms.positions)
+    current_state = optimized_state # Using your randomized state from the previous block
 
     print("Starting Magnetic Field Sweep...")
 
@@ -191,18 +194,20 @@ def calculate_conductance_with_magnopy():
         # Clear previous field terms if necessary or just add/overwrite
         # Note: If your version doesn't support 'overwrite', you may need to recreate the spinham
         new_spinham.add(nus=[(0,0,0), (0,0,0)], alphas=(0,0), 
-                        parameter=zeeman_matrix, overwrite=True)
+                        parameter=zeeman_matrix, populate_equivalent=True, when_present="replace")
         
         # 2. Re-optimize the state for the new field
         # Using the previous state as the starting point (warm start) speed up convergence
         energy_calc = magnopy.Energy(new_spinham)
-        optimized_state = energy_calc.optimize(current_state, energy_tolerance=1e-5)
-        current_state = optimized_state # Save for next field step
+        new_opt_state = energy_calc.optimize(current_state, energy_tolerance=1e-5)
+    
+    # Update for next iteration
+        current_state = new_opt_state
+    
+    # Calculate energy using the correct count
+        total_energy = energy_calc(new_opt_state)
+        avg_spin_energy = total_energy / n_spins_actual
         
-        # 3. Calculate Average Energy per site (meV)
-        # Total Energy / Number of Spins
-        total_energy = energy_calc(optimized_state)
-        avg_spin_energy = total_energy / n_spins
         
         # 4. Modulate Tunneling Barrier
         V_eff = V_offset + avg_spin_energy
