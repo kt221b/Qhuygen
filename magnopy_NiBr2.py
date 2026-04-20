@@ -4,6 +4,8 @@ Created on Thu Apr  2 13:36:37 2026
 
 @author: Principal
 """
+# defining hamiltonian
+import gc
 import numpy as np
 import matplotlib.pyplot as plt
 import magnopy 
@@ -103,12 +105,12 @@ if e_y > e_z:
     print("\nResult: Y is the Hard Axis (Easy-plane confirmed).")
 else:
     print("\nResult: Check anisotropy sign/parameter.")
-#%%  optimization
+#%%  supercell optimization
 
 
 # 5) Create the Supercell
 # Note: It's a standalone function where you pass the original spinham
-supercell_shape = (30, 30, 1)
+supercell_shape = (20, 20, 1)
 new_spinham = magnopy.make_supercell(spinham=spinham, supercell=supercell_shape)
 
 # 6) Optimization Setup
@@ -161,6 +163,88 @@ plt.ylabel('y ($\AA$)')
 plt.grid(True, linestyle='--', alpha=0.5)
 
 plt.show()
+
+#%%
+#making feild sweep for taking snapshot at each field 
+
+
+# Define your field range
+field_values = np.arange(-8, 9, 1)  # -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5
+results = {}
+g_factor = 2.0
+mu_B = 0.05788     # meV/T
+# Use the initial random state for the very first iteration
+
+current_state = initial_state
+
+for b_val in field_values:
+    print(f"Running optimization for B_z = {b_val}...")
+
+    # 1. Define the Zeeman matrix for the z-direction
+    # [0, 0, b_val] targets the S_z component
+    zeeman_param = g_factor * mu_B * b_val
+    zeeman_matrix = np.diag([zeeman_param, 0, 0])
+    
+    # 2. Update the Hamiltonian
+    # 'when_present="replace"' is key here to overwrite the previous field value
+    new_spinham.add(
+        nus=[(0,0,0), (0,0,0)], 
+        alphas=(0,0), 
+        parameter=zeeman_matrix, 
+        populate_equivalent=True, 
+        when_present="replace"
+    )
+    
+    # 3. Setup Energy object
+    energy = magnopy.Energy(new_spinham)
+    
+    # 4. Optimize
+    # We pass 'current_state' so the spins don't have to re-randomize every time
+    optimized_state = energy.optimize(current_state, energy_tolerance=1e-5)
+    
+    # 5. Store the result
+    results[b_val] = optimized_state
+    
+    # Update current_state for the next field step (adiabatic tracking)
+    current_state = optimized_state
+
+print("Optimization sweep finished.")
+#%%
+frac_pos = np.array(new_spinham.atoms.positions)
+super_cell_matrix = np.array(new_spinham.cell)
+cart_pos = frac_pos @ super_cell_matrix
+
+x = cart_pos[:, 0]
+y = cart_pos[:, 1]
+
+# 2. Iterate through the results dictionary
+# Sorted ensures we go from -5 to 5 in order
+for b_val in sorted(results.keys()):
+    # Extract the state for this specific field
+    S = np.array(results[b_val])
+    
+    u = S[:, 0]  # Sx
+    v = S[:, 1]  # Sy
+    w = S[:, 2]  # Sz (for color)
+
+    # 3. Create the Plot
+    plt.figure(figsize=(10, 8))
+    
+    # Use 'w' (Sz) for color to see out-of-plane tilting
+    q = plt.quiver(x, y, u, v, cmap='coolwarm', pivot='mid', 
+                   scale=60, width=0.005)
+
+    plt.colorbar(q, label='Spin Z-component ($S_z$)')
+
+    # Formatting
+    plt.gca().set_aspect('equal')
+    plt.title(f'Spin Texture at $B_z$ = {b_val}')
+    plt.xlabel('x ($\AA$)')
+    plt.ylabel('y ($\AA$)')
+    plt.grid(True, linestyle='--', alpha=0.3)
+
+    # Option A: Show each plot one by one
+    plt.show()
 #%%
 def calculate_conductance_with_magnopy():
     # --- Physical Parameters ---
@@ -173,10 +257,10 @@ def calculate_conductance_with_magnopy():
     mu_B = 0.05788     # meV/T
     
     # Range of Magnetic Fields
-    Bx_fields = np.linspace(-5, 5, 20) # Start with fewer points as optimization takes time
+    Bx_fields = np.linspace(-8, 8, 40) # Start with fewer points as optimization takes time
     conductance_list = []
     global optimized_state
-    supercell_shape = (30, 30, 1)
+    supercell_shape = (20, 20, 1)
     new_spinham = magnopy.make_supercell(spinham=spinham, supercell=supercell_shape)
     # Initial state for the first optimization
     n_spins_actual = len(new_spinham.atoms.positions)
@@ -188,7 +272,7 @@ def calculate_conductance_with_magnopy():
         # 1. Update Zeeman Term in the Hamiltonian
         # Zeeman energy = -g * mu_B * B * S_x
         # We add this as an on-site term (21 group)
-        zeeman_param = -g_factor * mu_B * B
+        zeeman_param = g_factor * mu_B * B
         zeeman_matrix = np.diag([zeeman_param, 0, 0])
         
         # Clear previous field terms if necessary or just add/overwrite
@@ -199,7 +283,7 @@ def calculate_conductance_with_magnopy():
         # 2. Re-optimize the state for the new field
         # Using the previous state as the starting point (warm start) speed up convergence
         energy_calc = magnopy.Energy(new_spinham)
-        new_opt_state = energy_calc.optimize(current_state, energy_tolerance=1e-5)
+        new_opt_state = energy_calc.optimize(current_state, energy_tolerance=1e-5, torque_tolerance=1e-05)
     
     # Update for next iteration
         current_state = new_opt_state
@@ -219,7 +303,8 @@ def calculate_conductance_with_magnopy():
         
         conductance_list.append(T)
         print(f"B = {B:.2f} T | Energy/site: {avg_spin_energy:.4f} meV | T: {T:.4e}")
-
+        del energy_calc
+        gc.collect()
     # --- Plotting ---
     plt.figure(figsize=(9, 5))
     G_plot = np.array(conductance_list) / np.max(conductance_list)
