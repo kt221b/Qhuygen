@@ -46,6 +46,7 @@ j1 = -1.313   # Ferromagnetic
 j2 = 0.016    # Often small/neglected in NiBr2, but added here for completeness
 j3 = 0.496   # Antiferromagnetic (Drives the helimagnetism)
 K  = 0.025    # Easy-plane (Hard-axis Z)
+
 #from neutron diffraction paper
 # j1 = 1.56   # Ferromagnetic
 # j2 = -0.018    # Often small/neglected in NiBr2, but added here for completeness
@@ -127,7 +128,7 @@ print(f"Starting optimization for {n_spins} spins...")
 
 # The optimize method returns the optimized spin configuration
 # method='cg' (Conjugate Gradient) is usually the best for this
-optimized_state = energy.optimize(initial_state, energy_tolerance=1e-6)
+optimized_state = energy.optimize(initial_state, energy_tolerance=1e-5)
 #%% plots
 frac_pos = np.array(new_spinham.atoms.positions)
 
@@ -157,7 +158,7 @@ q = plt.quiver(x, y, u, v, cmap='coolwarm', pivot='mid', scale=60)
 
 # Formatting for the triangular lattice
 plt.gca().set_aspect('equal')
-plt.title('NiBr2 Optimized Spin Texture (2 0x20 Supercell)')
+plt.title('NiBr2 Optimized Spin Texture (10x10 Supercell)')
 plt.xlabel('x ($\AA$)')
 plt.ylabel('y ($\AA$)')
 plt.grid(True, linestyle='--', alpha=0.5)
@@ -169,10 +170,10 @@ plt.show()
 
 
 # Define your field range
-field_values = np.arange(-8, 9, 1)  # -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5
+field_values = np.arange(0, 50, 10)  # -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5
 results = {}
 g_factor = 2.0
-mu_B = 0.05788     # meV/T
+mu_B = 1.0     # 0.05788 meV/T
 # Use the initial random state for the very first iteration
 
 current_state = initial_state
@@ -181,8 +182,8 @@ for b_val in field_values:
     print(f"Running optimization for B_z = {b_val}...")
 
     # 1. Define the Zeeman matrix for the z-direction
-    # [0, 0, b_val] targets the S_z component
-    zeeman_param = g_factor * mu_B * b_val
+    # [b_val, 0, 0] targets the S_x component
+    zeeman_param = -g_factor * mu_B * b_val
     zeeman_matrix = np.diag([zeeman_param, 0, 0])
     
     # 2. Update the Hamiltonian
@@ -217,7 +218,7 @@ cart_pos = frac_pos @ super_cell_matrix
 x = cart_pos[:, 0]
 y = cart_pos[:, 1]
 
-# 2. Iterate through the results dictionary
+# 2. Iterate through the results dictionary 
 # Sorted ensures we go from -5 to 5 in order
 for b_val in sorted(results.keys()):
     # Extract the state for this specific field
@@ -238,7 +239,7 @@ for b_val in sorted(results.keys()):
 
     # Formatting
     plt.gca().set_aspect('equal')
-    plt.title(f'Spin Texture at $B_z$ = {b_val}')
+    plt.title(f'Spin Texture at $B_x$ = {b_val}')
     plt.xlabel('x ($\AA$)')
     plt.ylabel('y ($\AA$)')
     plt.grid(True, linestyle='--', alpha=0.3)
